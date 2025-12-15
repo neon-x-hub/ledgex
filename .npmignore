@@ -1,0 +1,38 @@
+# Development files
+src/
+*.config.js
+rollup.config.js
+
+# Tests
+__tests__/
+*.test.js
+
+# Version control
+.git/
+.gitignore
+.github/
+
+# Documentation
+*.md
+!README.md
+CHANGELOG.md
+
+# Environment files
+.env
+.env.*
+npm-debug.log
+
+# Build system
+node_modules/
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Images
+images/
+*.gif
+*.png
+*.jpg
