@@ -1,0 +1,35 @@
+{
+    "name": "@ledgex/core",
+    "version": "0.5.0",
+    "description": "Key-value state management with efficient undo/redo",
+    "main": "dist/index.js",
+    "type": "module",
+    "private": false,
+    "publishConfig": {
+        "access": "public"
+    },
+    "module": "dist/esm/index.js",
+    "types": "dist/types/index.d.ts",
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "rollup -c",
+        "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+        "prepublishOnly": "npm run build && npm test",
+        "release": "np --no-tests"
+    },
+    "devDependencies": {
+        "jest": "^30.2.0",
+        "np": "^7.0.0",
+        "rollup": "^3.29.5"
+    },
+    "keywords": [
+        "react",
+        "state",
+        "undo",
+        "redo",
+        "time-travel"
+    ],
+    "license": "MIT"
+}
