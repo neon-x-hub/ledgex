@@ -1,6 +1,12 @@
 import CommitNode from "./CommitNode.js";
 import Clock from "./Clock.js";
 
+function isPlainObject(val: any): boolean {
+    if (val === null || typeof val !== 'object') return false;
+    const proto = Object.getPrototypeOf(val);
+    return proto === null || proto === Object.prototype;
+}
+
 class Layer {
     clock: Clock;
     flushThreshold: number;
@@ -19,41 +25,30 @@ class Layer {
     /**
      * Sets values at current time, automatically flattening nested objects
      * @param {string|Object} keyOrObject - Key or object of key-value pairs
-     * @param {any} [value] - Required if first param is string
+     * @param {any} [valueOrTime] - Required if first param is string
+     * @param {number} [time] - Custom timestamp
      */
-    set(keyOrObject: string | Record<string, any>, value?: any, time: number = this.clock.peek()): void {
-        if (typeof keyOrObject === 'object') {
-            const flatUpdates = this._flattenObject(keyOrObject);
+    set(keyOrObject: string | Record<string, any>, valueOrTime?: any, time?: number): void {
+        if (isPlainObject(keyOrObject)) {
+            const actualTime = typeof valueOrTime === 'number' ? valueOrTime : this.clock.peek();
+            const flatUpdates = this._flattenObject(keyOrObject as Record<string, any>);
             for (const [key, val] of Object.entries(flatUpdates)) {
-                this._setSingleKey(key, val, time);
+                this._setSingleKey(key, val, actualTime);
             }
         } else {
-            this._setSingleKey(keyOrObject, value, time);
-        }
-    }
-
-    _pruneAllKeys(forkTime: number): void {
-        for (const [key, commits] of this.history) {
-            if (commits.length > 0 && commits[commits.length - 1].t > forkTime) {
-                const lastValidCommit = this._findLatestCommit(commits, forkTime);
-                const cutIndex = lastValidCommit
-                    ? commits.indexOf(lastValidCommit)
-                    : -1;
-                this.history.set(key, cutIndex >= 0 ? commits.slice(0, cutIndex + 1) : []);
-            }
+            const actualTime = typeof time === 'number' ? time : this.clock.peek();
+            this._setSingleKey(keyOrObject as string, valueOrTime, actualTime);
         }
     }
 
     isUpdateMeaningful(updates: any, time: number): boolean {
-        let value: any;
+        if (updates === null || typeof updates !== 'object') return false;
 
-        const flat = typeof updates === 'object'
-            ? this._flattenObject(updates)
-            : { [updates]: value };
+        const flat = this._flattenObject(updates);
 
         return Object.entries(flat).some(([key, val]) => {
             const commits = this.history.get(key) || [];
-            const prev = this._findLatestCommit(commits, time + 1)?.v;
+            const prev = this._findLatestCommit(commits, time)?.v;
             return !CommitNode.valuesEqual(prev, val);
         });
     }
@@ -105,6 +100,28 @@ class Layer {
         const commits = this.history.get(key) || [];
         commits.push(new CommitNode(time, value));
         this.history.set(key, commits);
+
+        // 1. Shadow/tombstone any nested keys starting with `${key}.`
+        const prefix = `${key}.`;
+        for (const existingKey of this.history.keys()) {
+            if (existingKey.startsWith(prefix)) {
+                const subCommits = this.history.get(existingKey);
+                if (subCommits && subCommits.length > 0 && subCommits[subCommits.length - 1].v !== undefined) {
+                    subCommits.push(new CommitNode(time, undefined));
+                }
+            }
+        }
+
+        // 2. Shadow/tombstone any parent keys
+        const parts = key.split('.');
+        let parentKey = '';
+        for (let i = 0; i < parts.length - 1; i++) {
+            parentKey = parentKey ? `${parentKey}.${parts[i]}` : parts[i];
+            const parentCommits = this.history.get(parentKey);
+            if (parentCommits && parentCommits.length > 0 && parentCommits[parentCommits.length - 1].v !== undefined) {
+                parentCommits.push(new CommitNode(time, undefined));
+            }
+        }
     }
 
     /**
@@ -172,7 +189,7 @@ class Layer {
     _flattenObject(obj: Record<string, any>, prefix: string = ''): Record<string, any> {
         return Object.keys(obj).reduce((acc: Record<string, any>, k: string) => {
             const pre = prefix.length ? `${prefix}.` : '';
-            if (typeof obj[k] === 'object' && obj[k] !== null && !Array.isArray(obj[k])) {
+            if (isPlainObject(obj[k])) {
                 Object.assign(acc, this._flattenObject(obj[k], pre + k));
             } else {
                 acc[pre + k] = obj[k];
