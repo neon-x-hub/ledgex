@@ -287,3 +287,135 @@ describe("Ledger – functional correctness", () => {
     });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 3: Enhancement Integration Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Ledger – enhancements", () => {
+    let ledger: Ledgex;
+
+    beforeEach(() => {
+        ledger = new Ledgex({ bufferSize: 50, toleranceWindow: 5 });
+    });
+
+    // ─── canUndo / canRedo ───────────────────────────────────────────────────
+    test("canUndo() and canRedo() reflect clock state", () => {
+        expect(ledger.canUndo()).toBe(false);
+        expect(ledger.canRedo()).toBe(false);
+
+        ledger.set({ layerA: { x: 1 } });
+        expect(ledger.canUndo()).toBe(true);
+        expect(ledger.canRedo()).toBe(false);
+
+        ledger.undo();
+        expect(ledger.canUndo()).toBe(false);
+        expect(ledger.canRedo()).toBe(true);
+    });
+
+    // ─── clear() ─────────────────────────────────────────────────────────────
+    test("clear() resets all state to empty", () => {
+        ledger.set({ layerA: { x: 1 } });
+        ledger.clear();
+        expect(ledger.get()).toEqual({});
+        expect(ledger.canUndo()).toBe(false);
+        expect(ledger.canRedo()).toBe(false);
+        expect(ledger.getHistory()).toEqual([]);
+    });
+
+    test("clear() does not remove subscribers", async () => {
+        const cb = jest.fn();
+        ledger.subscribe(cb as any);
+        ledger.set({ layerA: { x: 1 } });
+        await Promise.resolve();
+        cb.mockClear();
+
+        ledger.clear();
+        await Promise.resolve();
+        expect(cb).toHaveBeenCalledTimes(1);
+    });
+
+    // ─── subscribeToLayer() ──────────────────────────────────────────────────
+    test("subscribeToLayer() only fires for the subscribed layer", async () => {
+        const cbA = jest.fn();
+        const cbB = jest.fn();
+        ledger.subscribeToLayer("layerA", cbA as any);
+        ledger.subscribeToLayer("layerB", cbB as any);
+
+        ledger.set({ layerA: { x: 1 } });
+        await Promise.resolve();
+
+        expect(cbA).toHaveBeenCalledTimes(1);
+        expect(cbB).not.toHaveBeenCalled();
+    });
+
+    test("subscribeToLayer() callback receives the new layer state", async () => {
+        let received: any;
+        ledger.subscribeToLayer("layerA", (state) => { received = state; });
+
+        ledger.set({ layerA: { x: 42, y: "hello" } });
+        await Promise.resolve();
+
+        expect(received).toEqual({ x: 42, y: "hello" });
+    });
+
+    test("subscribeToLayer() unsubscribe prevents further notifications", async () => {
+        const cb = jest.fn();
+        const unsub = ledger.subscribeToLayer("layerA", cb as any);
+        unsub();
+
+        ledger.set({ layerA: { x: 1 } });
+        await Promise.resolve();
+
+        expect(cb).not.toHaveBeenCalled();
+    });
+
+    test("subscribeToLayer() cleans up internal map after last unsub", () => {
+        const cb = jest.fn();
+        const unsub = ledger.subscribeToLayer("layerA", cb as any);
+        unsub();
+        expect((ledger as any)._layerSubscribers.has("layerA")).toBe(false);
+    });
+
+    test("subscribeToLayer() receives undefined when layer is removed", async () => {
+        let received: any = "not-called";
+        ledger.set({ layerA: { x: 1 } });
+        ledger.subscribeToLayer("layerA", (state) => { received = state; });
+
+        ledger.remove("layerA");
+        await Promise.resolve();
+
+        expect(received).toBeUndefined();
+    });
+
+    // ─── getHistory() ────────────────────────────────────────────────────────
+    test("getHistory() returns entries in time order", () => {
+        ledger.set({ layerA: { x: 1 } }, { label: "Step 1" });
+        ledger.set({ layerA: { x: 2 } }, { label: "Step 2" });
+
+        const history = ledger.getHistory();
+        expect(history).toHaveLength(2);
+        expect(history[0].label).toBe("Step 1");
+        expect(history[1].label).toBe("Step 2");
+        expect(history[0].time).toBeLessThan(history[1].time);
+    });
+
+    test("getHistory() omits label property for unlabeled steps", () => {
+        ledger.set({ layerA: { x: 1 } });
+        const history = ledger.getHistory();
+        expect(history[0]).not.toHaveProperty("label");
+    });
+
+    test("getHistory() is pruned after flush()", () => {
+        ledger.set({ layerA: { x: 1 } }, { label: "Old" });
+        ledger.set({ layerA: { x: 2 } }, { label: "New" });
+        ledger.flush();
+        expect(() => ledger.getHistory()).not.toThrow();
+    });
+
+    // ─── Circular reference ──────────────────────────────────────────────────
+    test("circular reference in set() throws a descriptive error", () => {
+        const obj: any = { x: 1 };
+        obj.self = obj;
+        expect(() => ledger.set({ layerA: obj })).toThrow(/circular/i);
+    });
+});
