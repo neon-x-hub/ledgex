@@ -21,8 +21,8 @@
 
 # Features
 
-* **Simple Global Key-Value Store**
-  A lightweight, globally shared state container with full type safety (when used with TypeScript).
+* **Natively Written in TypeScript**
+  Built with TypeScript out of the box, providing full type safety and rich auto-complete without requiring extra `@types/` packages.
 
 * **Built-in Time Travel**
   Native **undo / redo** support with minimal runtime and memory overhead.
@@ -309,20 +309,22 @@ ledger.set({
 
 ---
 
-### `get(layerIds?)`
+### `get(layerIds?, time?)`
 
-Returns the current state of one or more layers.
+Returns the state of one or more layers at a specific time (defaults to the current time).
 
 ```js
-ledger.get(); // all active layers
-ledger.get(['background', 'layer1']);
+ledger.get(); // all active layers at current time
+ledger.get(['background', 'layer1']); // specific layers at current time
+ledger.get(undefined, 5); // all active layers at time step 5 (historical query)
 ```
 
 #### Parameters
 
-| Name       | Type                  | Description             |
-| ---------- | --------------------- | ----------------------- |
-| `layerIds` | `string[]` (optional) | Specific layers to read |
+| Name       | Type                  | Description                                            |
+| ---------- | --------------------- | ------------------------------------------------------ |
+| `layerIds` | `string[]` (optional) | Specific layers to read. Defaults to all active layers. |
+| `time`     | `number` (optional)   | Specific time step to query state at.                  |
 
 #### Returns
 
@@ -330,7 +332,7 @@ ledger.get(['background', 'layer1']);
 Object<string, Object>
 ```
 
-Only **active layers** are included.
+Only **active layers** at the queried time are included.
 
 ---
 
