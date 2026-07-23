@@ -149,13 +149,12 @@ function handlePropsChange(layerId, newProps) {
 
 # Advanced Features
 
-### Batch Updates (Atomic State Changes)
+### Multi-layer Updates (One `set()` Call)
 
-Ledgex allows **multiple updates** to be grouped into **one undo/redo step**.
+When all your changes are ready at the same time, pass them all in a single `set()` call.
+This creates **one undo/redo entry** across all affected layers.
 
-This is ideal when several changes should be treated as **one user action**.
-
-```js
+```ts
 ledgex.set({
   layer1: { x: 100, y: 200 },
   layer2: { x: 100, y: 200 },
@@ -163,13 +162,9 @@ ledgex.set({
 }); // Single undo/redo entry
 ```
 
-**Use cases**:
+**Use cases**: aligning multiple layers, applying a preset, group transformations.
 
-* Aligning multiple layers
-* Applying a preset
-* Group transformations
 
----
 
 ### Deeply Nested Object Support
 
