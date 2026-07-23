@@ -45,6 +45,20 @@ class Clock {
     }
 
     /**
+     * Returns true if undo is possible (not at the beginning of history).
+     */
+    canUndo(): boolean {
+        return this.p > 0;
+    }
+
+    /**
+     * Returns true if redo is possible (not at the end of history).
+     */
+    canRedo(): boolean {
+        return this.p < this.t;
+    }
+
+    /**
      * Gets current time.
      * @returns {number}
      */
