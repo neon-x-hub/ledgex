@@ -19,13 +19,13 @@ class Layer {
     constructor(clock: Clock, flushThreshold: number = 30) {
         this.clock = clock;
         this.flushThreshold = flushThreshold;
-        this.history = new Map(); // Map<string, CommitNode<any>[]>
+        this.history = new Map();
     }
 
     /**
-     * Sets values at current time, automatically flattening nested objects
+     * Sets values at current time, automatically flattening nested objects.
      * @param {string|Object} keyOrObject - Key or object of key-value pairs
-     * @param {any} [valueOrTime] - Required if first param is string
+     * @param {any} [valueOrTime] - Value if first param is string, or time if first param is object
      * @param {number} [time] - Custom timestamp
      */
     set(keyOrObject: string | Record<string, any>, valueOrTime?: any, time?: number): void {
@@ -58,11 +58,11 @@ class Layer {
             if (commits.length === 0) continue;
             const effectiveMinTime = direction === "before" ? minTime - 1 : minTime;
             const lastValid = this._findLatestCommit(commits, effectiveMinTime);
-            const idx = commits.indexOf(lastValid!);
+            const idx = lastValid ? commits.indexOf(lastValid) : -1;
             let newCommits: CommitNode[];
             if (lastValid) {
                 if (direction === "after") {
-                    // Keep from lastValid onward
+                    // Keep from lastValid onward, rebasing its timestamp
                     lastValid.t = minTime;
                     newCommits = commits.slice(idx);
                 } else if (direction === "before") {
@@ -76,7 +76,6 @@ class Layer {
             } else {
                 newCommits = [];
             }
-            // if the newCommits is empty, remove the key
             if (newCommits.length === 0) {
                 this.history.delete(key);
                 continue;
@@ -96,30 +95,54 @@ class Layer {
     }
 
     // Internal Helpers
+
+    /**
+     * Inserts a CommitNode into a commits array in sorted order by time.
+     * Uses a fast-path append when the new commit is >= the last commit's time.
+     * @private
+     */
+    _insertCommit(commits: CommitNode[], node: CommitNode): void {
+        if (commits.length === 0 || node.t >= commits[commits.length - 1].t) {
+            commits.push(node);
+            return;
+        }
+        // Binary search for the correct insertion index
+        let low = 0, high = commits.length;
+        while (low < high) {
+            const mid = (low + high) >> 1;
+            if (commits[mid].t <= node.t) {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        commits.splice(low, 0, node);
+    }
+
     _setSingleKey(key: string, value: any, time: number): void {
         const commits = this.history.get(key) || [];
-        commits.push(new CommitNode(time, value));
+        this._insertCommit(commits, new CommitNode(time, value));
         this.history.set(key, commits);
 
-        // 1. Shadow/tombstone any nested keys starting with `${key}.`
+        // Shadow/tombstone any nested sub-keys starting with `${key}.`
         const prefix = `${key}.`;
         for (const existingKey of this.history.keys()) {
             if (existingKey.startsWith(prefix)) {
-                const subCommits = this.history.get(existingKey);
-                if (subCommits && subCommits.length > 0 && subCommits[subCommits.length - 1].v !== undefined) {
-                    subCommits.push(new CommitNode(time, undefined));
+                const subCommits = this.history.get(existingKey)!;
+                if (subCommits.length > 0 && subCommits[subCommits.length - 1].v !== undefined) {
+                    this._insertCommit(subCommits, new CommitNode(time, undefined));
                 }
             }
         }
 
-        // 2. Shadow/tombstone any parent keys
+        // Shadow/tombstone any parent keys
         const parts = key.split('.');
         let parentKey = '';
         for (let i = 0; i < parts.length - 1; i++) {
             parentKey = parentKey ? `${parentKey}.${parts[i]}` : parts[i];
             const parentCommits = this.history.get(parentKey);
             if (parentCommits && parentCommits.length > 0 && parentCommits[parentCommits.length - 1].v !== undefined) {
-                parentCommits.push(new CommitNode(time, undefined));
+                this._insertCommit(parentCommits, new CommitNode(time, undefined));
             }
         }
     }
@@ -141,7 +164,6 @@ class Layer {
     get(key: string, time: number = this.clock.peek()): any {
         const commits = this.history.get(key);
         if (!commits || commits.length === 0) return undefined;
-
         return this._findLatestCommit(commits, time)?.v;
     }
 
@@ -171,7 +193,7 @@ class Layer {
         let result: CommitNode | undefined;
 
         while (low <= high) {
-            const mid = (low + high) >> 1; // Bitwise version is slightly faster
+            const mid = (low + high) >> 1;
             if (commits[mid].t <= targetTime) {
                 result = commits[mid];
                 low = mid + 1;
@@ -183,16 +205,22 @@ class Layer {
     }
 
     /**
-     * Recursively flattens nested objects into dot notation
+     * Recursively flattens nested plain objects into dot-notation keys.
+     * Throws a descriptive error if a circular reference is detected.
      * @private
      */
-    _flattenObject(obj: Record<string, any>, prefix: string = ''): Record<string, any> {
+    _flattenObject(obj: Record<string, any>, prefix: string = '', _visited: WeakSet<object> = new WeakSet()): Record<string, any> {
+        if (_visited.has(obj)) {
+            throw new Error(`Circular reference detected at key "${prefix || '(root)'}"`);
+        }
+        _visited.add(obj);
+
         return Object.keys(obj).reduce((acc: Record<string, any>, k: string) => {
-            const pre = prefix.length ? `${prefix}.` : '';
+            const fullKey = prefix.length ? `${prefix}.${k}` : k;
             if (isPlainObject(obj[k])) {
-                Object.assign(acc, this._flattenObject(obj[k], pre + k));
+                Object.assign(acc, this._flattenObject(obj[k], fullKey, _visited));
             } else {
-                acc[pre + k] = obj[k];
+                acc[fullKey] = obj[k];
             }
             return acc;
         }, {});
