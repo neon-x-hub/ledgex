@@ -1,6 +1,5 @@
 import Clock from "./Clock.js";
 import Layer from "./Layer.js";
-import CommitNode from "./CommitNode.js";
 
 interface LedgerOptions {
     bufferSize?: number;
@@ -15,6 +14,7 @@ class Ledger {
     toleranceWindow: number;
     lastFlushTime: number;
     subscribers: Set<() => void>;
+    _pendingNotification: boolean;
 
     /**
      * Initializes a new instance of the Ledger class.
@@ -30,6 +30,7 @@ class Ledger {
         this.toleranceWindow = toleranceWindow;
         this.lastFlushTime = 0;
         this.subscribers = new Set();
+        this._pendingNotification = false;
     }
 
     /**
@@ -43,10 +44,18 @@ class Ledger {
         const timeBeforeCheck = this.clock.peek();
 
         for (const [layerId, layerUpdates] of Object.entries(updates)) {
-            const layer = this._getLayer(layerId, this.clock.peek() + 1);
-            if (layer.isUpdateMeaningful(layerUpdates, timeBeforeCheck)) {
-                hasMeaningfulUpdate = true;
-                break;
+            const layer = this.layers.get(layerId);
+            if (!layer) {
+                // New layer is a meaningful update if updates object has keys
+                if (Object.keys(layerUpdates).length > 0) {
+                    hasMeaningfulUpdate = true;
+                    break;
+                }
+            } else {
+                if (layer.isUpdateMeaningful(layerUpdates, timeBeforeCheck)) {
+                    hasMeaningfulUpdate = true;
+                    break;
+                }
             }
         }
 
@@ -60,7 +69,7 @@ class Ledger {
         }
 
         for (const [layerId, layerUpdates] of Object.entries(updates)) {
-            this._getLayer(layerId).set(layerUpdates, time);
+            this._getLayer(layerId, time).set(layerUpdates, time);
         }
 
         this._autoFlush(time);
@@ -88,14 +97,14 @@ class Ledger {
     }
 
     /**
-     * Gets the current state of the given layerIds or all layers if no layerIds are provided.
+     * Gets the state of the given layerIds or all layers at a specific time (defaults to current time).
      * @param {string[]|undefined} layerIds - Optional array of layerIds to get state for.
-     * @returns {Record<string, Record<string, any>>} - Object with layerId as key and current state as value.
+     * @param {number} [time=this.clock.peek()] - Time to query state at.
+     * @returns {Record<string, Record<string, any>>} - Object with layerId as key and state as value.
      */
-    get(layerIds?: string[]): Record<string, Record<string, any>> {
+    get(layerIds?: string[], time: number = this.clock.peek()): Record<string, Record<string, any>> {
         const result: Record<string, Record<string, any>> = {};
         const targets = layerIds || [...this.layers.keys()];
-        const time = this.clock.peek();
 
         for (const layerId of targets) {
             if (this._isLayerActive(layerId, time)) {
@@ -108,11 +117,15 @@ class Ledger {
     /**
      * Reverts the state to the previous meaningful state.
      * If there is no previous state, this method does nothing.
-     * @returns {Record<string, Record<string, any>>|undefined} The state before the undo operation.
+     * @returns {Record<string, Record<string, any>>|undefined} The state after the undo operation.
      *  If there was no previous state, this method returns undefined.
      */
     undo(): Record<string, Record<string, any>> | undefined {
+        const prevTime = this.clock.peek();
         const time = this.clock.undo();
+        if (time === prevTime) {
+            return undefined;
+        }
         const state = this.get();
         this._notify();
         return state;
@@ -125,7 +138,11 @@ class Ledger {
      *  If there was no next state, this method returns undefined.
      */
     redo(): Record<string, Record<string, any>> | undefined {
+        const prevTime = this.clock.peek();
         const time = this.clock.redo();
+        if (time === prevTime) {
+            return undefined;
+        }
         const state = this.get();
         this._notify();
         return state;
@@ -133,14 +150,20 @@ class Ledger {
 
     /**
      * Deactivates a layer.
-     * If the layer does not exist, this method does nothing.
+     * If the layer does not exist or is already inactive, this method does nothing.
      * @param {string} layerId - The ID of the layer to deactivate
      * @returns {void}
      */
     remove(layerId: string): void {
-        this.clock.tick();
-        this.genesis.set(layerId, false);
-        this._notify();
+        if (this._isLayerActive(layerId)) {
+            const isFork = this.clock.p < this.clock.t;
+            const time = this.clock.tick();
+            if (isFork) {
+                this.prune(time);
+            }
+            this.genesis.set(layerId, false, time);
+            this._notify();
+        }
     }
 
     /**
@@ -180,20 +203,8 @@ class Ledger {
         this._notify();
     }
 
-    // Internal Utilities
-    _getOrCreateLayer(layerId: string): Layer {
-        if (!this.layers.has(layerId)) {
-            const layer = new Layer(this.clock);
-            this.layers.set(layerId, layer);
-            this.genesis.set(layerId, [
-                new CommitNode(this.clock.t, true)
-            ]);
-        }
-        return this.layers.get(layerId)!;
-    }
-
-    _isLayerActive(layerId: string, time?: number): boolean {
-        const layerState = this.genesis.get(layerId);
+    _isLayerActive(layerId: string, time: number = this.clock.peek()): boolean {
+        const layerState = this.genesis.get(layerId, time);
         return layerState || false;
     }
 
@@ -218,7 +229,10 @@ class Ledger {
      * Notify all subscribers (internal)
      */
     _notify(): void {
+        if (this._pendingNotification) return;
+        this._pendingNotification = true;
         queueMicrotask(() => {
+            this._pendingNotification = false;
             this.subscribers.forEach(cb => cb());
         });
     }
