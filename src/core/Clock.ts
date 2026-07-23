@@ -1,8 +1,10 @@
-
 /**
  * Manages the timeline of commits with undo/redo capabilities.
  */
 class Clock {
+    t: number;
+    p: number;
+
     constructor() {
         // Maximum timestamp in history
         this.t = 0;
@@ -14,7 +16,7 @@ class Clock {
      * Advances the clock, handling branch truncation if needed.
      * @returns {number} New current time
      */
-    tick() {
+    tick(): number {
         if (this.p < this.t) {
             // Truncate future history when branching
             this.t = this.p;
@@ -28,7 +30,7 @@ class Clock {
      * Moves backward in time.
      * @returns {number} New current time
      */
-    undo() {
+    undo(): number {
         if (this.p > 0) this.p--;
         return this.p;
     }
@@ -37,7 +39,7 @@ class Clock {
      * Moves forward in time.
      * @returns {number} New current time
      */
-    redo() {
+    redo(): number {
         if (this.p < this.t) this.p++;
         return this.p;
     }
@@ -46,7 +48,7 @@ class Clock {
      * Gets current time.
      * @returns {number}
      */
-    peek() {
+    peek(): number {
         return this.p;
     }
 
@@ -54,7 +56,7 @@ class Clock {
      * Gets maximum available time.
      * @returns {number}
      */
-    max() {
+    max(): number {
         return this.t;
     }
 
@@ -62,7 +64,7 @@ class Clock {
      * Jumps to a specific time (for advanced use cases).
      * @param {number} time
      */
-    resetTo(time) {
+    resetTo(time: number): void {
         if (time >= 0 && time <= this.t) {
             this.p = time;
         }

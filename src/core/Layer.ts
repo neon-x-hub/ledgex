@@ -1,25 +1,27 @@
 import CommitNode from "./CommitNode.js";
 import Clock from "./Clock.js";
 
-
-
 class Layer {
+    clock: Clock;
+    flushThreshold: number;
+    history: Map<string, CommitNode[]>;
+
     /**
      * @param {Clock} clock - Shared clock instance
      * @param {number} [flushThreshold=30] - Max history entries to keep per key
      */
-    constructor(clock, flushThreshold = 30) {
+    constructor(clock: Clock, flushThreshold: number = 30) {
         this.clock = clock;
         this.flushThreshold = flushThreshold;
         this.history = new Map(); // Map<string, CommitNode<any>[]>
     }
 
     /**
-  * Sets values at current time, automatically flattening nested objects
-  * @param {string|Object} keyOrObject - Key or object of key-value pairs
-  * @param {any} [value] - Required if first param is string
-  */
-    set(keyOrObject, value, time = this.clock.peek()) {
+     * Sets values at current time, automatically flattening nested objects
+     * @param {string|Object} keyOrObject - Key or object of key-value pairs
+     * @param {any} [value] - Required if first param is string
+     */
+    set(keyOrObject: string | Record<string, any>, value?: any, time: number = this.clock.peek()): void {
         if (typeof keyOrObject === 'object') {
             const flatUpdates = this._flattenObject(keyOrObject);
             for (const [key, val] of Object.entries(flatUpdates)) {
@@ -30,7 +32,7 @@ class Layer {
         }
     }
 
-    _pruneAllKeys(forkTime) {
+    _pruneAllKeys(forkTime: number): void {
         for (const [key, commits] of this.history) {
             if (commits.length > 0 && commits[commits.length - 1].t > forkTime) {
                 const lastValidCommit = this._findLatestCommit(commits, forkTime);
@@ -42,27 +44,27 @@ class Layer {
         }
     }
 
-    isUpdateMeaningful(updates, time) {
+    isUpdateMeaningful(updates: any, time: number): boolean {
+        let value: any;
 
         const flat = typeof updates === 'object'
             ? this._flattenObject(updates)
             : { [updates]: value };
 
-        return Object.entries(flat).some(([key, value]) => {
+        return Object.entries(flat).some(([key, val]) => {
             const commits = this.history.get(key) || [];
             const prev = this._findLatestCommit(commits, time + 1)?.v;
-            return !CommitNode.valuesEqual(prev, value);
+            return !CommitNode.valuesEqual(prev, val);
         });
     }
 
-
-    _trimHistory(minTime, { direction = "after", keepLatest = false } = {}) {
+    _trimHistory(minTime: number, { direction = "after", keepLatest = false }: { direction?: "before" | "after"; keepLatest?: boolean } = {}): void {
         for (const [key, commits] of this.history) {
             if (commits.length === 0) continue;
             const effectiveMinTime = direction === "before" ? minTime - 1 : minTime;
             const lastValid = this._findLatestCommit(commits, effectiveMinTime);
-            const idx = commits.indexOf(lastValid);
-            let newCommits;
+            const idx = commits.indexOf(lastValid!);
+            let newCommits: CommitNode[];
             if (lastValid) {
                 if (direction === "after") {
                     // Keep from lastValid onward
@@ -88,30 +90,28 @@ class Layer {
         }
     }
 
-
-
     // Fork pruning (exact match)
-    prune(forkTime) {
+    prune(forkTime: number): void {
         this._trimHistory(forkTime, { direction: "before", keepLatest: false });
     }
 
     // History flushing (keep at least one)
-    flush(thresholdTime) {
+    flush(thresholdTime: number): void {
         this._trimHistory(thresholdTime, { direction: "after", keepLatest: true });
-
     }
 
     // Internal Helpers
-    _setSingleKey(key, value, time) {
+    _setSingleKey(key: string, value: any, time: number): void {
         const commits = this.history.get(key) || [];
         commits.push(new CommitNode(time, value));
         this.history.set(key, commits);
     }
+
     /**
      * Marks a key as deleted at current time
      * @param {string} key
      */
-    remove(key) {
+    remove(key: string): void {
         this.set(key, undefined); // Tombstone
     }
 
@@ -121,7 +121,7 @@ class Layer {
      * @param {number} [time=this.clock.peek()]
      * @returns {any|undefined} undefined means key doesn't exist at this time
      */
-    get(key, time = this.clock.peek()) {
+    get(key: string, time: number = this.clock.peek()): any {
         const commits = this.history.get(key);
         if (!commits || commits.length === 0) return undefined;
 
@@ -133,8 +133,8 @@ class Layer {
      * @param {number} [time=this.clock.peek()]
      * @returns {Object} Key-value pairs of alive keys
      */
-    getState(time = this.clock.peek()) {
-        const state = {};
+    getState(time: number = this.clock.peek()): Record<string, any> {
+        const state: Record<string, any> = {};
         for (const [key, commits] of this.history) {
             const value = this._findLatestCommit(commits, time)?.v;
             if (value !== undefined) { // Skip tombstones
@@ -148,11 +148,10 @@ class Layer {
      * Binary search for latest commit <= target time
      * @private
      */
-    _findLatestCommit(commits, targetTime) {
-
+    _findLatestCommit(commits: CommitNode[], targetTime: number): CommitNode | undefined {
         let low = 0;
         let high = commits.length - 1;
-        let result;
+        let result: CommitNode | undefined;
 
         while (low <= high) {
             const mid = (low + high) >> 1; // Bitwise version is slightly faster
@@ -163,15 +162,15 @@ class Layer {
                 high = mid - 1;
             }
         }
-        return result; // undefined, why?
+        return result;
     }
 
     /**
-  * Recursively flattens nested objects into dot notation
-  * @private
-  */
-    _flattenObject(obj, prefix = '') {
-        return Object.keys(obj).reduce((acc, k) => {
+     * Recursively flattens nested objects into dot notation
+     * @private
+     */
+    _flattenObject(obj: Record<string, any>, prefix: string = ''): Record<string, any> {
+        return Object.keys(obj).reduce((acc: Record<string, any>, k: string) => {
             const pre = prefix.length ? `${prefix}.` : '';
             if (typeof obj[k] === 'object' && obj[k] !== null && !Array.isArray(obj[k])) {
                 Object.assign(acc, this._flattenObject(obj[k], pre + k));
@@ -183,12 +182,12 @@ class Layer {
     }
 
     /**
- * Recursively deflattens an object with dot notation keys
- * back into a nested object structure.
- * @private
- */
-    _deflattenObject(obj) {
-        const result = {};
+     * Recursively deflattens an object with dot notation keys
+     * back into a nested object structure.
+     * @private
+     */
+    _deflattenObject(obj: Record<string, any>): Record<string, any> {
+        const result: Record<string, any> = {};
         for (const [key, value] of Object.entries(obj)) {
             const keys = key.split('.');
             let current = result;
@@ -205,8 +204,6 @@ class Layer {
         }
         return result;
     }
-
-
 }
 
 export default Layer;

@@ -1,8 +1,8 @@
-import { Ledgex } from "../src";
+import { Ledgex } from "../src/index.js";
 import { jest } from '@jest/globals';
 
 describe("Ledger – functional correctness", () => {
-    let ledger;
+    let ledger: Ledgex;
 
     beforeEach(() => {
         ledger = new Ledgex({ bufferSize: 5, toleranceWindow: 2 });
@@ -84,7 +84,6 @@ describe("Ledger – functional correctness", () => {
     });
 
     test("removed layer can be re-added later", () => {
-
         ledger.set({ layerA: { x: 1 } });
         ledger.remove("layerA");
         ledger.set({ layerA: { x: 2 } });
@@ -107,7 +106,6 @@ describe("Ledger – functional correctness", () => {
 
         expect(state).toEqual({ layerB: { b: 2 } });
     });
-
 
     // -------------------------
     // Flushing
@@ -168,7 +166,7 @@ describe("Ledger – functional correctness", () => {
     // -------------------------
     test("subscriber is notified after state change", async () => {
         const cb = jest.fn();
-        ledger.subscribe(cb);
+        ledger.subscribe(cb as any);
 
         ledger.set({ layerA: { x: 1 } });
 
@@ -179,7 +177,7 @@ describe("Ledger – functional correctness", () => {
 
     test("unsubscribe prevents further notifications", async () => {
         const cb = jest.fn();
-        const unsubscribe = ledger.subscribe(cb);
+        const unsubscribe = ledger.subscribe(cb as any);
 
         unsubscribe();
         ledger.set({ layerA: { x: 1 } });

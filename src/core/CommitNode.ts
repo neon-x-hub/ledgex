@@ -2,18 +2,20 @@
  * Represents a single commit in the history with a value and timestamp.
  * @template T - Type of the stored value
  */
-class CommitNode {
+class CommitNode<T = any> {
+    t: number;
+    v: T;
+
     /**
      * @param {number} time - Timestamp of the commit
      * @param {T} value - Committed value
      */
-    constructor(time, value) {
+    constructor(time: number, value: T) {
         this.t = time;
         this.v = value;
     }
 
-
-    static valuesEqual(a, b) {
+    static valuesEqual(a: any, b: any): boolean {
         // Both undefined/null
         if (a == null && b == null) return true;
 
