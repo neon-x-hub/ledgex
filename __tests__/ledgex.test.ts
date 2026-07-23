@@ -200,4 +200,90 @@ describe("Ledger – functional correctness", () => {
 
         expect(state).toEqual({ layerB: { y: 2 } });
     });
+
+    // -------------------------
+    // Regression & Bug Fix Verification
+    // -------------------------
+    test("Date objects are preserved and not flattened", () => {
+        const testDate = new Date("2026-07-23T18:00:00.000Z");
+        ledger.set({
+            layerA: { created: testDate }
+        });
+        const state = ledger.get();
+        expect(state.layerA.created).toBeInstanceOf(Date);
+        expect(state.layerA.created.getTime()).toBe(testDate.getTime());
+    });
+
+    test("overwriting parent key shadows all nested keys", () => {
+        ledger.set({
+            layerA: { user: { name: "Alice", age: 30 } }
+        });
+        expect(ledger.get().layerA).toEqual({ user: { name: "Alice", age: 30 } });
+
+        // Overwrite user object with primitive
+        ledger.set({
+            layerA: { user: "Bob" }
+        });
+        expect(ledger.get().layerA).toEqual({ user: "Bob" });
+
+        // Overwrite user with undefined (deleting it)
+        ledger.set({
+            layerA: { user: undefined }
+        });
+        expect(ledger.get().layerA).toEqual({});
+    });
+
+    test("setting nested key shadows previous parent primitive values", () => {
+        ledger.set({
+            layerA: { user: "Bob" }
+        });
+        expect(ledger.get().layerA).toEqual({ user: "Bob" });
+
+        // Now set nested key user.name
+        ledger.set({
+            layerA: { user: { name: "Alice" } }
+        });
+        expect(ledger.get().layerA).toEqual({ user: { name: "Alice" } });
+    });
+
+    test("historical state queries get() with time parameter", () => {
+        ledger.set({ layerA: { x: 1 } }); // t=1
+        ledger.set({ layerA: { x: 2 } }); // t=2
+
+        expect(ledger.get(undefined, 1)).toEqual({ layerA: { x: 1 } });
+        expect(ledger.get(undefined, 2)).toEqual({ layerA: { x: 2 } });
+        expect(ledger.get()).toEqual({ layerA: { x: 2 } }); // current time remains t=2
+    });
+
+    test("no-op undo() and redo() return undefined at boundaries", () => {
+        expect(ledger.undo()).toBeUndefined();
+        
+        ledger.set({ layerA: { x: 1 } });
+        expect(ledger.redo()).toBeUndefined();
+        
+        ledger.undo();
+        expect(ledger.undo()).toBeUndefined();
+    });
+
+    test("subscriber notifications are batched/deduplicated on auto-flush", async () => {
+        const cb = jest.fn();
+        ledger.subscribe(cb as any);
+
+        // Populate to trigger autoFlush on next set
+        ledger.set({ layerA: { x: 0 } });
+        await Promise.resolve();
+        cb.mockClear();
+
+        // Perform write that triggers auto-flush
+        for (let i = 1; i <= 10; i++) {
+            ledger.set({ layerA: { x: i } });
+        }
+
+        await Promise.resolve();
+
+        // With batching/deduplication, the callback should only be triggered once per tick
+        // (even though flush() and set() both notify)
+        expect(cb).toHaveBeenCalledTimes(1);
+    });
 });
+
