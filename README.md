@@ -16,6 +16,7 @@
 - [Basic Usage](#basic-usage)
 - [Real-World Example](#real-world-example-photo-editor-layer-backups-undo--redo)
 - [Advanced Features](#advanced-features)
+- [Performance & Benchmarks](#performance--benchmarks)
 - [API Reference](#ledgex-api-reference)
 - [Support](#support)
 
@@ -504,6 +505,28 @@ ledger.redo(); // reapplies x = 15
 * Diagram & design tools
 * Complex form editors
 * Any application requiring **efficient undo/redo**
+
+## Performance & Benchmarks
+
+Ledgex uses a key-level delta commit architecture with memoized state reconstruction, avoiding full object cloning on every update step.
+
+### Benchmark Results (10,000 Attributes over 500 Steps)
+
+Workload configuration: **10,000 total attributes** across 5 layers, updated over **500 sequential ticks** with **15% property mutation** per step.
+
+| Metric | Naive Full-Snapshot | Ledgex (Delta Store) | Difference / Performance Impact |
+|---|---|---|---|
+| **Memory Footprint** | 221.45 MB | **25.80 MB** | 🟢 **88.3% LESS memory** (~8.5x memory efficiency) |
+| **Read (`get()`) Current State** | 848.96 ms (1,000 ops) | **9.84 ms** (1,000 ops) | **~0.009 ms / query** (Instant $O(1)$ cached access) |
+| **Read (`get()`) Historical State** | 863.68 ms (1,000 ops) | **1,990.92 ms** (1,000 ops) | Fast enough point-in-time state reconstruction |
+
+### Running Benchmarks Locally
+
+Run the benchmark suite locally with garbage collection flags using:
+
+```bash
+npm run bench
+```
 
 ---
 
