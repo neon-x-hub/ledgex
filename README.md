@@ -17,6 +17,7 @@
 - [Real-World Example](#real-world-example-photo-editor-layer-backups-undo--redo)
 - [Advanced Features](#advanced-features)
 - [Performance & Benchmarks](#performance--benchmarks)
+- [Under the Hood](#under-the-hood)
 - [API Reference](#ledgex-api-reference)
 - [Support](#support)
 
@@ -527,6 +528,27 @@ Run the benchmark suite locally with garbage collection flags using:
 ```bash
 npm run bench
 ```
+
+---
+
+## Under the Hood
+
+For senior developers and architects interested in the internal engine mechanics:
+
+### 1. Key-Level Delta Log Architecture
+Unlike traditional snapshot engines (which duplicate full object trees on every change: $O(N)$ memory per tick), Ledgex flattens nested state graphs into normalized dot-notation paths (`"layer.transform.x"`). Only modified keys append a `CommitNode({ t, v })` to an append-only timeline. Memory scales linearly with change size ($O(\Delta)$), not total object complexity.
+
+### 2. Monotonic Logical Timeline
+Ledgex manages a shared, monotonically increasing virtual clock ($t$). Undoing or redoing operations simply moves a logical cursor ($p$) across historical timestamps without mutating recorded commit arrays. Branching history (writing after an undo) automatically prunes invalid future branches.
+
+### 3. Structural Tombstoning & Shadowing
+When nested properties or parent objects are updated or deleted, Ledgex writes tombstone markers (`undefined` values) at timestamp $t$. This ensures nested object mutations and sub-key cleanups are deterministic across point-in-time queries without requiring complex tree diffing.
+
+### 4. Point-in-Time Reconstruction & Memoization
+Querying state at timestamp $t$ performs a binary search (`_findLatestCommit`) over active key timelines to find the latest value $\le t$, then deflattens the object graph. Reconstructed layer states are cached per timestamp and invalidated only when new mutations occur, rendering repeated reads instantaneous ($O(1)$).
+
+### 5. Automated Memory Bounding
+Ledgex auto-flushes history beyond a configurable `bufferSize`. During a flush, it retains the latest anchor commit at the cutoff timestamp for every active key while safely discarding obsolete historical nodes.
 
 ---
 
