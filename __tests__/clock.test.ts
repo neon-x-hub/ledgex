@@ -1,3 +1,4 @@
+import { describe, test, expect, beforeEach } from '@jest/globals';
 import Clock from '../src/core/Clock.js';
 
 describe('Clock – isolated unit tests', () => {

@@ -1,5 +1,5 @@
+import { describe, test, expect, beforeEach, jest } from '@jest/globals';
 import { Ledgex } from "../src/index.js";
-import { jest } from '@jest/globals';
 
 describe("Ledger – functional correctness", () => {
     let ledger: Ledgex;

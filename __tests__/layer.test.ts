@@ -1,3 +1,4 @@
+import { describe, test, expect } from '@jest/globals';
 import Clock from '../src/core/Clock.js';
 import Layer from '../src/core/Layer.js';
 

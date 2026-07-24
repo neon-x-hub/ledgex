@@ -16,6 +16,7 @@
     "scripts": {
         "build": "rollup -c && tsc --emitDeclarationOnly --declaration --declarationDir ./dist/types",
         "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+        "bench": "npm run build && node --expose-gc benchmarks/benchmark.js",
         "prepublishOnly": "npm run build && npm test",
         "release": "np --no-tests"
     },
