@@ -11,6 +11,8 @@ class Layer {
     clock: Clock;
     flushThreshold: number;
     history: Map<string, CommitNode[]>;
+    _stateCache: Map<number, Record<string, any>>;
+    _hasNestedKeys: boolean;
 
     /**
      * @param {Clock} clock - Shared clock instance
@@ -20,6 +22,8 @@ class Layer {
         this.clock = clock;
         this.flushThreshold = flushThreshold;
         this.history = new Map();
+        this._stateCache = new Map();
+        this._hasNestedKeys = false;
     }
 
     /**
@@ -54,6 +58,7 @@ class Layer {
     }
 
     _trimHistory(minTime: number, { direction = "after", keepLatest = false }: { direction?: "before" | "after"; keepLatest?: boolean } = {}): void {
+        this._stateCache.clear();
         for (const [key, commits] of this.history) {
             if (commits.length === 0) continue;
             const effectiveMinTime = direction === "before" ? minTime - 1 : minTime;
@@ -120,17 +125,24 @@ class Layer {
     }
 
     _setSingleKey(key: string, value: any, time: number): void {
+        this._stateCache.clear();
         const commits = this.history.get(key) || [];
         this._insertCommit(commits, new CommitNode(time, value));
         this.history.set(key, commits);
 
+        if (key.includes('.')) {
+            this._hasNestedKeys = true;
+        }
+
         // Shadow/tombstone any nested sub-keys starting with `${key}.`
-        const prefix = `${key}.`;
-        for (const existingKey of this.history.keys()) {
-            if (existingKey.startsWith(prefix)) {
-                const subCommits = this.history.get(existingKey)!;
-                if (subCommits.length > 0 && subCommits[subCommits.length - 1].v !== undefined) {
-                    this._insertCommit(subCommits, new CommitNode(time, undefined));
+        if (this._hasNestedKeys) {
+            const prefix = `${key}.`;
+            for (const existingKey of this.history.keys()) {
+                if (existingKey.startsWith(prefix)) {
+                    const subCommits = this.history.get(existingKey)!;
+                    if (subCommits.length > 0 && subCommits[subCommits.length - 1].v !== undefined) {
+                        this._insertCommit(subCommits, new CommitNode(time, undefined));
+                    }
                 }
             }
         }
@@ -173,6 +185,9 @@ class Layer {
      * @returns {Object} Key-value pairs of alive keys
      */
     getState(time: number = this.clock.peek()): Record<string, any> {
+        if (this._stateCache.has(time)) {
+            return this._stateCache.get(time)!;
+        }
         const state: Record<string, any> = {};
         for (const [key, commits] of this.history) {
             const value = this._findLatestCommit(commits, time)?.v;
@@ -180,7 +195,9 @@ class Layer {
                 state[key] = value;
             }
         }
-        return this._deflattenObject(state);
+        const deflattened = this._deflattenObject(state);
+        this._stateCache.set(time, deflattened);
+        return deflattened;
     }
 
     /**
@@ -209,21 +226,27 @@ class Layer {
      * Throws a descriptive error if a circular reference is detected.
      * @private
      */
-    _flattenObject(obj: Record<string, any>, prefix: string = '', _visited: WeakSet<object> = new WeakSet()): Record<string, any> {
+    _flattenObject(
+        obj: Record<string, any>,
+        prefix: string = '',
+        _visited: WeakSet<object> = new WeakSet(),
+        target: Record<string, any> = {}
+    ): Record<string, any> {
         if (_visited.has(obj)) {
             throw new Error(`Circular reference detected at key "${prefix || '(root)'}"`);
         }
         _visited.add(obj);
 
-        return Object.keys(obj).reduce((acc: Record<string, any>, k: string) => {
+        for (const k in obj) {
+            const val = obj[k];
             const fullKey = prefix.length ? `${prefix}.${k}` : k;
-            if (isPlainObject(obj[k])) {
-                Object.assign(acc, this._flattenObject(obj[k], fullKey, _visited));
+            if (isPlainObject(val)) {
+                this._flattenObject(val, fullKey, _visited, target);
             } else {
-                acc[fullKey] = obj[k];
+                target[fullKey] = val;
             }
-            return acc;
-        }, {});
+        }
+        return target;
     }
 
     /**
@@ -233,19 +256,32 @@ class Layer {
      */
     _deflattenObject(obj: Record<string, any>): Record<string, any> {
         const result: Record<string, any> = {};
-        for (const [key, value] of Object.entries(obj)) {
-            const keys = key.split('.');
+        for (const key in obj) {
+            const value = obj[key];
+            const firstDot = key.indexOf('.');
+            
+            if (firstDot === -1) {
+                // Fast path for non-nested keys: no array allocations or string splits
+                result[key] = value;
+                continue;
+            }
+
             let current = result;
-            keys.forEach((part, index) => {
-                if (index === keys.length - 1) {
-                    current[part] = value;
-                } else {
-                    if (!current[part] || typeof current[part] !== 'object') {
-                        current[part] = {};
-                    }
-                    current = current[part];
+            let start = 0;
+            let dotIdx = firstDot;
+
+            while (dotIdx !== -1) {
+                const part = key.substring(start, dotIdx);
+                let next = current[part];
+                if (next === undefined || typeof next !== 'object' || next === null) {
+                    next = {};
+                    current[part] = next;
                 }
-            });
+                current = next;
+                start = dotIdx + 1;
+                dotIdx = key.indexOf('.', start);
+            }
+            current[key.substring(start)] = value;
         }
         return result;
     }
